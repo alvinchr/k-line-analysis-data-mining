@@ -50,6 +50,13 @@ analysis_stocks = [
 current_data = None
 pattern_candidates = None
 
+# Store complete results from 10-stock analysis
+ten_stock_data = {}
+
+# Store Top 10 bullish / bearish cases
+top_bullish_results = []
+top_bearish_results = []
+
 
 # ==================================================
 # DOWNLOAD DATA
@@ -271,10 +278,6 @@ def find_patterns():
 
         # ==========================================
         # SIGNAL
-        #
-        # +1 = future price rises > 5%
-        # -1 = future price falls > 5%
-        #  0 = neither
         # ==========================================
 
         train["signal"] = 0
@@ -311,7 +314,6 @@ def find_patterns():
             train["signal"] != 0
         ].copy()
 
-        # Keep important features
         candidates = candidates[
             [
                 "Date",
@@ -359,11 +361,8 @@ def find_patterns():
         for _, row in display_candidates.iterrows():
 
             if row["signal"] == 1:
-
                 signal_text = "BULLISH"
-
             else:
-
                 signal_text = "BEARISH"
 
             pattern_table.insert(
@@ -408,7 +407,14 @@ def find_patterns():
 
 def run_10_stocks():
 
-    results = []
+    global ten_stock_data
+    global top_bullish_results
+    global top_bearish_results
+
+    # Reset previous results
+    ten_stock_data = {}
+    top_bullish_results = []
+    top_bearish_results = []
 
     # ==============================================
     # CLEAR OLD RESULTS
@@ -417,6 +423,14 @@ def run_10_stocks():
     for item in stock_result_table.get_children():
 
         stock_result_table.delete(item)
+
+    for item in bullish_top_table.get_children():
+
+        bullish_top_table.delete(item)
+
+    for item in bearish_top_table.get_children():
+
+        bearish_top_table.delete(item)
 
     # ==============================================
     # SHOW ALL STOCKS AS WAITING
@@ -430,10 +444,13 @@ def run_10_stocks():
             iid=stock,
             values=(
                 stock,
-                "2018-2025",
+                "WAITING",
                 "-",
                 "-",
-                "WAITING"
+                "-",
+                "-",
+                "-",
+                "-"
             )
         )
 
@@ -452,18 +469,17 @@ def run_10_stocks():
 
         try:
 
-            # --------------------------------------
-            # SHOW RUNNING
-            # --------------------------------------
-
             stock_result_table.item(
                 stock,
                 values=(
                     stock,
-                    "2018-2025",
+                    "RUNNING",
                     "-",
                     "-",
-                    "RUNNING"
+                    "-",
+                    "-",
+                    "-",
+                    "-"
                 )
             )
 
@@ -492,10 +508,13 @@ def run_10_stocks():
                     stock,
                     values=(
                         stock,
-                        "2018-2025",
+                        "FAILED",
                         "-",
                         "-",
-                        "FAILED"
+                        "-",
+                        "-",
+                        "-",
+                        "-"
                     )
                 )
 
@@ -520,9 +539,7 @@ def run_10_stocks():
             # CALCULATE FEATURES
             # --------------------------------------
 
-            data = calculate_features(
-                data
-            )
+            data = calculate_features(data)
 
             # --------------------------------------
             # TRAINING DATA
@@ -549,13 +566,11 @@ def run_10_stocks():
 
             train["signal"] = 0
 
-            # Bullish
             train.loc[
                 train["future_return_3d"] > 0.05,
                 "signal"
             ] = 1
 
-            # Bearish
             train.loc[
                 train["future_return_3d"] < -0.05,
                 "signal"
@@ -576,43 +591,146 @@ def run_10_stocks():
             )
 
             # --------------------------------------
-            # COUNT CANDIDATES
+            # KEEP ONLY BULLISH / BEARISH EVENTS
             # --------------------------------------
 
-            bullish = len(
-                train[
-                    train["signal"] == 1
-                ]
+            candidates = train[
+                train["signal"] != 0
+            ].copy()
+
+            # --------------------------------------
+            # COUNT
+            # --------------------------------------
+
+            bullish_candidates = candidates[
+                candidates["signal"] == 1
+            ].copy()
+
+            bearish_candidates = candidates[
+                candidates["signal"] == -1
+            ].copy()
+
+            bullish_count = len(
+                bullish_candidates
             )
 
-            bearish = len(
-                train[
-                    train["signal"] == -1
-                ]
+            bearish_count = len(
+                bearish_candidates
             )
 
-            # Save result
-            results.append(
-                (
-                    stock,
-                    bullish,
-                    bearish,
-                    len(train)
+            # --------------------------------------
+            # FIND HIGHEST BULLISH CASE
+            # --------------------------------------
+
+            if not bullish_candidates.empty:
+
+                bullish_idx = (
+                    bullish_candidates[
+                        "future_return_3d"
+                    ].idxmax()
                 )
-            )
+
+                highest_bullish = (
+                    bullish_candidates.loc[
+                        bullish_idx
+                    ]
+                )
+
+            else:
+
+                highest_bullish = None
 
             # --------------------------------------
-            # SHOW COMPLETE
+            # FIND HIGHEST BEARISH CASE
+            # --------------------------------------
+
+            if not bearish_candidates.empty:
+
+                bearish_idx = (
+                    bearish_candidates[
+                        "future_return_3d"
+                    ].idxmin()
+                )
+
+                highest_bearish = (
+                    bearish_candidates.loc[
+                        bearish_idx
+                    ]
+                )
+
+            else:
+
+                highest_bearish = None
+
+            # --------------------------------------
+            # SAVE ALL DATA
+            # --------------------------------------
+
+            ten_stock_data[stock] = {
+                "data": data,
+                "train": train,
+                "candidates": candidates,
+                "bullish": bullish_candidates,
+                "bearish": bearish_candidates,
+                "highest_bullish": highest_bullish,
+                "highest_bearish": highest_bearish
+            }
+
+            # --------------------------------------
+            # VALUES FOR SUMMARY TABLE
+            # --------------------------------------
+
+            if highest_bullish is not None:
+
+                bullish_return = (
+                    highest_bullish[
+                        "future_return_3d"
+                    ] * 100
+                )
+
+                bullish_date = (
+                    highest_bullish["Date"]
+                    .strftime("%Y-%m-%d")
+                )
+
+            else:
+
+                bullish_return = 0
+                bullish_date = "-"
+
+            if highest_bearish is not None:
+
+                bearish_return = (
+                    highest_bearish[
+                        "future_return_3d"
+                    ] * 100
+                )
+
+                bearish_date = (
+                    highest_bearish["Date"]
+                    .strftime("%Y-%m-%d")
+                )
+
+            else:
+
+                bearish_return = 0
+                bearish_date = "-"
+
+            # --------------------------------------
+            # UPDATE SUMMARY TABLE
             # --------------------------------------
 
             stock_result_table.item(
                 stock,
                 values=(
                     stock,
-                    "2018-2025",
-                    bullish,
-                    bearish,
-                    "COMPLETE"
+                    "COMPLETE",
+                    bullish_count,
+                    bearish_count,
+                    f"+{bullish_return:.2f}%",
+                    bullish_date,
+                    f"{bearish_return:.2f}%",
+                    bearish_date
                 )
             )
 
@@ -628,14 +746,23 @@ def run_10_stocks():
                 stock,
                 values=(
                     stock,
-                    "2018-2025",
+                    "FAILED",
                     "-",
                     "-",
-                    "FAILED"
+                    "-",
+                    "-",
+                    "-",
+                    "-"
                 )
             )
 
             window.update()
+
+    # ==============================================
+    # BUILD TOP 10 RESULTS
+    # ==============================================
+
+    build_top_10_results()
 
     # ==============================================
     # FINISHED
@@ -643,13 +770,205 @@ def run_10_stocks():
 
     status_label.config(
         text=(
-            f"10-stock analysis completed: "
-            f"{len(results)} stocks"
+            f"10-stock analysis completed | "
+            f"{len(ten_stock_data)} stocks analyzed | "
+            f"Top 10 results generated"
         ),
         fg="#16A34A"
     )
 
     window.update()
+
+
+# ==================================================
+# BUILD TOP 10 BULLISH / BEARISH
+# ==================================================
+
+def build_top_10_results():
+
+    global top_bullish_results
+    global top_bearish_results
+
+    bullish_all = []
+    bearish_all = []
+
+    # ==============================================
+    # COLLECT RESULTS FROM ALL 10 STOCKS
+    # ==============================================
+
+    for stock, result in ten_stock_data.items():
+
+        bullish = result["bullish"]
+        bearish = result["bearish"]
+
+        # ------------------------------------------
+        # BULLISH
+        # ------------------------------------------
+
+        for _, row in bullish.iterrows():
+
+            bullish_all.append({
+                "stock": stock,
+                "date": row["Date"],
+                "return": row["future_return_3d"],
+                "body_ratio": row["body_ratio"],
+                "upper_ratio": row["upper_ratio"],
+                "lower_ratio": row["lower_ratio"],
+                "volume_ratio": row["volume_ratio"],
+                "close": row["Close"]
+            })
+
+        # ------------------------------------------
+        # BEARISH
+        # ------------------------------------------
+
+        for _, row in bearish.iterrows():
+
+            bearish_all.append({
+                "stock": stock,
+                "date": row["Date"],
+                "return": row["future_return_3d"],
+                "body_ratio": row["body_ratio"],
+                "upper_ratio": row["upper_ratio"],
+                "lower_ratio": row["lower_ratio"],
+                "volume_ratio": row["volume_ratio"],
+                "close": row["Close"]
+            })
+
+    # ==============================================
+    # SORT
+    # ==============================================
+
+    bullish_all.sort(
+        key=lambda x: x["return"],
+        reverse=True
+    )
+
+    bearish_all.sort(
+        key=lambda x: x["return"]
+    )
+
+    # ==============================================
+    # KEEP TOP 10
+    # ==============================================
+
+    top_bullish_results = bullish_all[:10]
+
+    top_bearish_results = bearish_all[:10]
+
+    # ==============================================
+    # DISPLAY TOP 10 BULLISH
+    # ==============================================
+
+    for item in bullish_top_table.get_children():
+
+        bullish_top_table.delete(item)
+
+    for rank, result in enumerate(
+        top_bullish_results,
+        start=1
+    ):
+
+        bullish_top_table.insert(
+            "",
+            "end",
+            values=(
+                rank,
+                result["stock"],
+                result["date"].strftime("%Y-%m-%d"),
+                f"+{result['return'] * 100:.2f}%",
+                f"{result['body_ratio']:.3f}",
+                f"{result['upper_ratio']:.3f}",
+                f"{result['lower_ratio']:.3f}",
+                f"{result['volume_ratio']:.2f}"
+            )
+        )
+
+    # ==============================================
+    # DISPLAY TOP 10 BEARISH
+    # ==============================================
+
+    for item in bearish_top_table.get_children():
+
+        bearish_top_table.delete(item)
+
+    for rank, result in enumerate(
+        top_bearish_results,
+        start=1
+    ):
+
+        bearish_top_table.insert(
+            "",
+            "end",
+            values=(
+                rank,
+                result["stock"],
+                result["date"].strftime("%Y-%m-%d"),
+                f"{result['return'] * 100:.2f}%",
+                f"{result['body_ratio']:.3f}",
+                f"{result['upper_ratio']:.3f}",
+                f"{result['lower_ratio']:.3f}",
+                f"{result['volume_ratio']:.2f}"
+            )
+        )
+
+
+# ==================================================
+# SHOW TOP PATTERN DETAIL
+# ==================================================
+
+def show_selected_bullish(event=None):
+
+    selected = bullish_top_table.selection()
+
+    if not selected:
+        return
+
+    values = bullish_top_table.item(
+        selected[0],
+        "values"
+    )
+
+    messagebox.showinfo(
+        "Bullish Pattern Detail",
+        (
+            f"Rank: {values[0]}\n"
+            f"Stock: {values[1]}\n"
+            f"Date: {values[2]}\n"
+            f"3-Day Return: {values[3]}\n\n"
+            f"Body Ratio: {values[4]}\n"
+            f"Upper Ratio: {values[5]}\n"
+            f"Lower Ratio: {values[6]}\n"
+            f"Volume Ratio: {values[7]}"
+        )
+    )
+
+
+def show_selected_bearish(event=None):
+
+    selected = bearish_top_table.selection()
+
+    if not selected:
+        return
+
+    values = bearish_top_table.item(
+        selected[0],
+        "values"
+    )
+
+    messagebox.showinfo(
+        "Bearish Pattern Detail",
+        (
+            f"Rank: {values[0]}\n"
+            f"Stock: {values[1]}\n"
+            f"Date: {values[2]}\n"
+            f"3-Day Return: {values[3]}\n\n"
+            f"Body Ratio: {values[4]}\n"
+            f"Upper Ratio: {values[5]}\n"
+            f"Lower Ratio: {values[6]}\n"
+            f"Volume Ratio: {values[7]}"
+        )
+    )
 
 
 # ==================================================
@@ -661,20 +980,12 @@ def pattern_similarity(
     pattern_b
 ):
 
-    # ==========================================
-    # FEATURES
-    # ==========================================
-
     features = [
         "body_ratio",
         "upper_ratio",
         "lower_ratio",
         "volume_ratio"
     ]
-
-    # ==========================================
-    # INITIAL WEIGHTS
-    # ==========================================
 
     weights = {
 
@@ -686,10 +997,6 @@ def pattern_similarity(
 
         "volume_ratio": 0.20
     }
-
-    # ==========================================
-    # WEIGHTED EUCLIDEAN DISTANCE
-    # ==========================================
 
     distance = 0
 
@@ -708,10 +1015,6 @@ def pattern_similarity(
     distance = np.sqrt(
         distance
     )
-
-    # ==========================================
-    # CONVERT DISTANCE TO SIMILARITY
-    # ==========================================
 
     similarity = (
         1
@@ -747,7 +1050,6 @@ def test_similarity():
 
         return
 
-    # Take first two candidate patterns
     pattern_a = pattern_candidates.iloc[0]
 
     pattern_b = pattern_candidates.iloc[1]
@@ -815,9 +1117,6 @@ def draw_chart(
 
         close_price = row["Close"]
 
-        # Green = up
-        # Red = down
-
         if close_price >= open_price:
 
             color = "green"
@@ -826,10 +1125,7 @@ def draw_chart(
 
             color = "red"
 
-        # --------------------------------------
         # Wick
-        # --------------------------------------
-
         ax.plot(
             [x, x],
             [
@@ -840,10 +1136,7 @@ def draw_chart(
             linewidth=1
         )
 
-        # --------------------------------------
         # Candle body
-        # --------------------------------------
-
         bottom = min(
             open_price,
             close_price
@@ -914,7 +1207,7 @@ window.title(
 )
 
 window.geometry(
-    "1150x800"
+    "1250x850"
 )
 
 window.configure(
@@ -960,11 +1253,123 @@ tk.Label(
 
 
 # ==================================================
+# SCROLLABLE MAIN AREA
+# ==================================================
+
+# Outer frame
+scroll_container = tk.Frame(
+    window,
+    bg="#F4F7FB"
+)
+
+scroll_container.pack(
+    fill="both",
+    expand=True
+)
+
+
+# Canvas
+main_canvas = tk.Canvas(
+    scroll_container,
+    bg="#F4F7FB",
+    highlightthickness=0
+)
+
+main_canvas.pack(
+    side="left",
+    fill="both",
+    expand=True
+)
+
+
+# Vertical scrollbar
+main_scrollbar = ttk.Scrollbar(
+    scroll_container,
+    orient="vertical",
+    command=main_canvas.yview
+)
+
+main_scrollbar.pack(
+    side="right",
+    fill="y"
+)
+
+
+main_canvas.configure(
+    yscrollcommand=main_scrollbar.set
+)
+
+
+# This frame contains EVERYTHING below the header
+content_frame = tk.Frame(
+    main_canvas,
+    bg="#F4F7FB"
+)
+
+
+content_window = main_canvas.create_window(
+    (0, 0),
+    window=content_frame,
+    anchor="nw"
+)
+
+
+# ==================================================
+# UPDATE SCROLL REGION
+# ==================================================
+
+def update_scroll_region(event=None):
+
+    main_canvas.configure(
+        scrollregion=main_canvas.bbox("all")
+    )
+
+
+content_frame.bind(
+    "<Configure>",
+    update_scroll_region
+)
+
+
+# Make content frame same width as canvas
+def resize_content(event):
+
+    main_canvas.itemconfig(
+        content_window,
+        width=event.width
+    )
+
+
+main_canvas.bind(
+    "<Configure>",
+    resize_content
+)
+
+
+# ==================================================
+# MOUSE WHEEL SCROLLING
+# ==================================================
+
+def mouse_wheel(event):
+
+    main_canvas.yview_scroll(
+        int(-1 * (event.delta / 120)),
+        "units"
+    )
+
+
+main_canvas.bind_all(
+    "<MouseWheel>",
+    mouse_wheel
+)
+
+
+# ==================================================
 # CONTROL AREA
 # ==================================================
 
 control = tk.Frame(
-    window,
+    content_frame,
     bg="white",
     padx=20,
     pady=7
@@ -1079,7 +1484,7 @@ status_label.pack(
 # ==================================================
 
 tk.Label(
-    window,
+    content_frame,
     text="Historical OHLCV Data",
     font=("Arial", 15, "bold"),
     bg="#F4F7FB",
@@ -1091,7 +1496,7 @@ tk.Label(
 
 
 table_frame = tk.Frame(
-    window,
+    content_frame,
     bg="white"
 )
 
@@ -1162,7 +1567,7 @@ table.configure(
 # ==================================================
 
 tk.Label(
-    window,
+    content_frame,
     text="Detected Training Patterns",
     font=("Arial", 15, "bold"),
     bg="#F4F7FB",
@@ -1175,7 +1580,7 @@ tk.Label(
 
 
 pattern_frame = tk.Frame(
-    window,
+    content_frame,
     bg="white"
 )
 
@@ -1247,7 +1652,7 @@ pattern_table.configure(
 # ==================================================
 
 tk.Label(
-    window,
+    content_frame,
     text="10-Stock Assignment Analysis",
     font=("Arial", 15, "bold"),
     bg="#F4F7FB",
@@ -1260,11 +1665,11 @@ tk.Label(
 
 
 # ------------------------------------------
-# 10-STOCK CONTROL AREA
+# CONTROL AREA
 # ------------------------------------------
 
 stock_analysis_control = tk.Frame(
-    window,
+    content_frame,
     bg="white",
     padx=15,
     pady=10
@@ -1303,10 +1708,6 @@ tk.Label(
 )
 
 
-# ------------------------------------------
-# RUN 10-STOCK ANALYSIS BUTTON
-# ------------------------------------------
-
 tk.Button(
     stock_analysis_control,
     text="RUN 10-STOCK ANALYSIS",
@@ -1322,40 +1723,62 @@ tk.Button(
 )
 
 
-# ------------------------------------------
-# 10-STOCK RESULT TABLE
-# ------------------------------------------
+# ==================================================
+# 10-STOCK SUMMARY TABLE
+# ==================================================
 
-stock_result_frame = tk.Frame(window, bg="white")
-stock_result_frame.pack(fill="x", padx=25, pady=5)
-
-stock_result_title = tk.Label(
-    stock_result_frame,
-    text="10-Stock Assignment Analysis",
-    font=("Arial", 12, "bold"),
+stock_result_frame = tk.Frame(
+    content_frame,
     bg="white"
 )
-stock_result_title.pack(anchor="w")
 
-# Frame for table + scrollbar
-stock_table_container = tk.Frame(stock_result_frame, bg="white")
-stock_table_container.pack(fill="x")
+stock_result_frame.pack(
+    fill="x",
+    padx=25,
+    pady=5
+)
+
+
+tk.Label(
+    stock_result_frame,
+    text="10-Stock Historical Summary",
+    font=("Arial", 12, "bold"),
+    bg="white"
+).pack(
+    anchor="w"
+)
+
+
+stock_table_container = tk.Frame(
+    stock_result_frame,
+    bg="white"
+)
+
+stock_table_container.pack(
+    fill="x"
+)
+
 
 stock_result_columns = (
     "Stock",
     "Status",
     "Bullish",
-    "Bearish"
+    "Bearish",
+    "Max Bullish",
+    "Bullish Date",
+    "Max Bearish",
+    "Bearish Date"
 )
+
 
 stock_result_table = ttk.Treeview(
     stock_table_container,
     columns=stock_result_columns,
     show="headings",
-    height=3
+    height=5
 )
 
-# Scrollbar
+
 stock_scrollbar = ttk.Scrollbar(
     stock_table_container,
     orient="vertical",
@@ -1366,17 +1789,64 @@ stock_result_table.configure(
     yscrollcommand=stock_scrollbar.set
 )
 
-# Headings
+
 for col in stock_result_columns:
-    stock_result_table.heading(col, text=col)
 
-# Column widths
-stock_result_table.column("Stock", width=100)
-stock_result_table.column("Status", width=150)
-stock_result_table.column("Bullish", width=100)
-stock_result_table.column("Bearish", width=100)
+    stock_result_table.heading(
+        col,
+        text=col
+    )
 
-# Put table + scrollbar side by side
+
+stock_result_table.column(
+    "Stock",
+    width=75,
+    anchor="center"
+)
+
+stock_result_table.column(
+    "Status",
+    width=90,
+    anchor="center"
+)
+
+stock_result_table.column(
+    "Bullish",
+    width=75,
+    anchor="center"
+)
+
+stock_result_table.column(
+    "Bearish",
+    width=75,
+    anchor="center"
+)
+
+stock_result_table.column(
+    "Max Bullish",
+    width=100,
+    anchor="center"
+)
+
+stock_result_table.column(
+    "Bullish Date",
+    width=110,
+    anchor="center"
+)
+
+stock_result_table.column(
+    "Max Bearish",
+    width=100,
+    anchor="center"
+)
+
+stock_result_table.column(
+    "Bearish Date",
+    width=110,
+    anchor="center"
+)
+
+
 stock_result_table.pack(
     side="left",
     fill="x",
@@ -1388,12 +1858,163 @@ stock_scrollbar.pack(
     fill="y"
 )
 
+
+# ==================================================
+# TOP 10 BULLISH
+# ==================================================
+
+tk.Label(
+    content_frame,
+    text="Top 10 Bullish Historical Patterns",
+    font=("Arial", 14, "bold"),
+    bg="#F4F7FB",
+    fg="#15803D"
+).pack(
+    anchor="w",
+    padx=25,
+    pady=(8, 0)
+)
+
+
+bullish_frame = tk.Frame(
+    content_frame,
+    bg="white"
+)
+
+bullish_frame.pack(
+    fill="x",
+    padx=25,
+    pady=5
+)
+
+
+bullish_columns = (
+    "Rank",
+    "Stock",
+    "Date",
+    "3-Day Return",
+    "Body Ratio",
+    "Upper Ratio",
+    "Lower Ratio",
+    "Volume Ratio"
+)
+
+
+bullish_top_table = ttk.Treeview(
+    bullish_frame,
+    columns=bullish_columns,
+    show="headings",
+    height=5
+)
+
+
+for column in bullish_columns:
+
+    bullish_top_table.heading(
+        column,
+        text=column
+    )
+
+    bullish_top_table.column(
+        column,
+        width=125,
+        anchor="center"
+    )
+
+
+bullish_top_table.pack(
+    fill="x",
+    expand=True
+)
+
+
+bullish_top_table.bind(
+    "<Double-1>",
+    show_selected_bullish
+)
+
+
+# ==================================================
+# TOP 10 BEARISH
+# ==================================================
+
+tk.Label(
+    content_frame,
+    text="Top 10 Bearish Historical Patterns",
+    font=("Arial", 14, "bold"),
+    bg="#F4F7FB",
+    fg="#B91C1C"
+).pack(
+    anchor="w",
+    padx=25,
+    pady=(8, 0)
+)
+
+
+bearish_frame = tk.Frame(
+    content_frame,
+    bg="white"
+)
+
+bearish_frame.pack(
+    fill="x",
+    padx=25,
+    pady=5
+)
+
+
+bearish_columns = (
+    "Rank",
+    "Stock",
+    "Date",
+    "3-Day Return",
+    "Body Ratio",
+    "Upper Ratio",
+    "Lower Ratio",
+    "Volume Ratio"
+)
+
+
+bearish_top_table = ttk.Treeview(
+    bearish_frame,
+    columns=bearish_columns,
+    show="headings",
+    height=5
+)
+
+
+for column in bearish_columns:
+
+    bearish_top_table.heading(
+        column,
+        text=column
+    )
+
+    bearish_top_table.column(
+        column,
+        width=125,
+        anchor="center"
+    )
+
+
+bearish_top_table.pack(
+    fill="x",
+    expand=True
+)
+
+
+bearish_top_table.bind(
+    "<Double-1>",
+    show_selected_bearish
+)
+
+
 # ==================================================
 # K-LINE CHART
 # ==================================================
 
 tk.Label(
-    window,
+    content_frame,
     text="K-Line Chart",
     font=("Arial", 15, "bold"),
     bg="#F4F7FB",
@@ -1405,12 +2026,8 @@ tk.Label(
 )
 
 
-# FIXED HEIGHT
-# This prevents the chart from pushing
-# the 10-stock section away.
-
 chart_frame = tk.Frame(
-    window,
+    content_frame,
     bg="white",
     height=200
 )
